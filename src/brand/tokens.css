@@ -1,0 +1,76 @@
+/*
+ * Emergence / COPO brand tokens
+ * Palette: Direction 1 (adopted June 2026)
+ * Hero ("home jersey"): Chartreuse #CFEE46
+ *
+ * Chartreuse is the brand signature. It is used as a FILL / FIELD / HIGHLIGHT
+ * with dark ink on top — never as small text on a light ground, where it
+ * fails contrast. For legible interactive text and borders, use --accent
+ * (Forest). The generative tools should expose a strict two-color mode:
+ * --hero on --ink (or --ink on --hero).
+ *
+ * Typography:
+ *   - Financier Display — display headings (contemporary editorial serif;
+ *     replaces Garamond per feedback)
+ *   - Zichtbaar Regular / Demibold — subheadings & UI labels
+ *   - Manrope — body copy
+ */
+
+:root {
+  /* ── Direction 1 palette (named) ───────────────────────────── */
+  --c-white: #ffffff;
+  --c-sand: #faf4ef;
+  --c-stone: #c5c1b8;
+  --c-lime: #c8df9a;
+  --c-chartreuse: #cfee46;
+  --c-clay: #96904f;
+  --c-seafoam: #5f7767;
+  --c-forest: #242c1f;
+  --c-lavender: #9a678a;
+  --c-sky: #6095ea;
+  --c-black: #000000;
+
+  /* ── Hero ──────────────────────────────────────────────────── */
+  --hero: var(--c-chartreuse);
+  --hero-ink: var(--c-black);            /* text that sits ON chartreuse */
+  --hero-soft: rgba(207, 238, 70, 0.18);
+  --hero-tint: var(--c-lime);            /* softer companion to the hero */
+
+  /* ── Semantic aliases ──────────────────────────────────────── */
+  --bg: var(--c-sand);
+  --bg-elevated: var(--c-white);
+  --ink: var(--c-black);
+  --ink-muted: rgba(0, 0, 0, 0.55);
+
+  /* Interactive / text accent — kept legible (Forest), since the hero
+     chartreuse cannot carry text on a light ground. */
+  --accent: var(--c-forest);
+  --accent-hover: #1a2016;
+  --accent-soft: rgba(36, 44, 31, 0.1);
+
+  /* Organic / supporting */
+  --nature: var(--c-seafoam);
+  --nature-soft: rgba(95, 119, 103, 0.14);
+
+  --border: rgba(0, 0, 0, 0.1);
+
+  /* ── Legacy aliases (remapped to the new palette so existing
+        components shift cohesively; prefer the tokens above) ──── */
+  --copo-white: var(--c-white);
+  --copo-off-white: var(--c-sand);
+  --copo-black: var(--c-black);
+  --copo-blue: var(--c-sky);
+  --copo-blue-bright: var(--c-sky);
+  --copo-evergreen: var(--c-forest);
+  --copo-earth-red: var(--c-clay);
+
+  /* ── Typography ────────────────────────────────────────────── */
+  --font-display: 'Financier Display', Georgia, 'Times New Roman', serif;
+  --font-subhead: 'Zichtbaar', system-ui, sans-serif;
+  --font-body: 'Manrope', system-ui, sans-serif;
+
+  /* ── Layout ────────────────────────────────────────────────── */
+  --border-radius-lg: 12px;
+  --border-radius-md: 8px;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.05);
+}
