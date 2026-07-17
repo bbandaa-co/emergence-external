@@ -46,7 +46,7 @@ export interface FadeFns {
  * Build per-line cutoff + tip taper helpers.
  * Softening is relative to each vector's end — not a canvas-wide wash.
  */
-export function makeFade(w: number, h: number, opts: FadeOptions = {}): FadeFns {
+export function makeFade(_w: number, h: number, opts: FadeOptions = {}): FadeFns {
   const start = opts.start ?? 0.58; // keep density longer; thin only in the lower band
   const floor = opts.floor ?? 0.94; // small clear margin at the bottom
   const tipFrac = opts.tipFrac ?? 0.42;
