@@ -1,9 +1,9 @@
-# Emergence — Toolkit
+# Emergence Tooling
 
 A set of generative brand tools that treat a mark the way we treat a company:
-as latent potential waiting to unfold. Each tool lives in a tab at the top and
-renders to a canvas you can export as PNG, SVG, or MP4. A small system for
-compounding simple inputs into something that grows.
+as latent potential waiting to unfold. 
+Each tool lives in a tab at the top and renders to a canvas you can export as PNG, SVG, or MP4. 
+A small system for compounding simple inputs into something that grows.
 
 ## Tools
 Parent Brand : Organic Branching
