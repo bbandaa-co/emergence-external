@@ -7,6 +7,7 @@ compounding simple inputs into something that grows.
 
 ## Tools
 Parent Brand : Organic Branching
+
 8 Verticals :
 - Healthcare
 - Infrastructure
