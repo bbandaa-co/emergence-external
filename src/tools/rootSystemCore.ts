@@ -30,6 +30,8 @@ export interface RootParams {
   taper: number; // width-vs-subtree exponent (lower = sharper taper)
   coil: number; // 0..1 how much each root end coils into a tendril curl
   endThickness: number; // engineered: ×base width the trace ends fatten to
+  stamp: number; // 0..1 organic ink-stamp fatten/smooth pass (0 = off)
+  cutout: number; // 0..1 organic cutout break/simplify pass (0 = off)
   hairDensity: number; // 0..1 amount of fine root-hair / mycelial fill
   bedrockOffset: number; // 0..0.4 where the bedrock datum sits from the top
   // image
@@ -44,11 +46,14 @@ export const DEFAULT_ROOT: RootParams = {
   downwardBias: 0.35,
   lateralReach: 42,
   taprootThickness: 1.5,
-  thickness: 0.4,
+  thickness: 0.12,
   // Gentle end shaping and moderate tendril curl.
   taper: 0.14,
   coil: 0.25,
   endThickness: 2.6,
+  // Ink treatment defaults matched against the handoff PSD reference.
+  stamp: 0.16,
+  cutout: 0.34,
   // Root Brush's organic mode is clean linework — no mycelial hair layer.
   // (The Health tool keeps its own mycelium via a separate default.)
   hairDensity: 0,
@@ -64,10 +69,12 @@ export const ROOT_RANGES: Record<keyof RootParams, [number, number, number]> = {
   downwardBias: [0, 1, 0.01],
   lateralReach: [20, 120, 1],
   taprootThickness: [0.1, 3, 0.01],
-  thickness: [0.1, 1.5, 0.05],
+  thickness: [0.1, 0.25, 0.01],
   taper: [-0.5, 0.5, 0.01],
   coil: [0, 1, 0.01],
   endThickness: [0.5, 8, 0.1],
+  stamp: [0, 0.45, 0.01],
+  cutout: [0, 1, 0.01],
   hairDensity: [0, 1, 0.01],
   bedrockOffset: [0, 0.4, 0.01],
   threshold: [0, 0.6, 0.01],
@@ -85,6 +92,8 @@ export const ROOT_LABELS: Record<keyof RootParams, string> = {
   taper: "Taper",
   coil: "Coil",
   endThickness: "End Thickness",
+  stamp: "Stamp",
+  cutout: "Cutout",
   hairDensity: "Mycelium",
   bedrockOffset: "Bedrock",
   threshold: "Threshold",
@@ -111,6 +120,10 @@ export const ROOT_HINTS: Record<keyof RootParams, string> = {
     "How much each root end coils into a tendril curl. Zero leaves the ends straight; higher winds a tighter, longer spiral.",
   endThickness:
     "Engineered brush: absolute width of the terminal pad at each trace end, independent of the connecting trace — so thin and thick traces get the same-size end.",
+  stamp:
+    "Organic brush: ink-stamp fatten pass (à la Photoshop's Stamp filter). Spreads and smooths the linework into solid calligraphic ink, fusing fine clusters. Zero switches it off.",
+  cutout:
+    "Organic brush: cutout pass (à la Photoshop's Cutout filter). Simplifies the stroke contours and pinches thin spots into organic breaks and dashes — never thickens the line. Zero switches it off.",
   hairDensity:
     "Amount of fine root-hair / mycelial threads filling the negative space — the hidden web beneath the structural roots.",
   bedrockOffset:
@@ -127,6 +140,8 @@ export const SLIDER_KEYS_SIMPLE: (keyof RootParams)[] = [
   "seed",
   "density",
   "thickness",
+  "stamp",
+  "cutout",
 ];
 
 export const SLIDER_KEYS_GROW: (keyof RootParams)[] = [
@@ -837,8 +852,10 @@ export function growRoots(
   // "Line weight" is the single width control exposed in the UI (`thickness`).
   // Laterals track it directly; this factor propagates the same relative change
   // to the otherwise-fixed widths (main taproot, engineered terminal pad) so the
-  // slider scales EVERY line evenly rather than just the laterals.
-  const lineScale = p.thickness / DEFAULT_ROOT.thickness;
+  // slider scales EVERY line evenly rather than just the laterals. The 0.4
+  // reference is fixed (not DEFAULT_ROOT.thickness) so retuning the default
+  // slider position never changes what a given slider value renders.
+  const lineScale = p.thickness / 0.4;
 
   // Engineered trace base width per tier. The main taproot tracks the `main root`
   // slider (scaled by line weight); laterals track `line weight` directly (×4
@@ -1145,25 +1162,67 @@ function strokeRootSegment(
 
 // ---- rendering -------------------------------------------------------------
 
-export function drawRoots(
+// The organic ink-stamp treatment, reverse-engineered from the handoff PSD
+// (a Root Brush export run through Photoshop's Filter Gallery: Cutout, then
+// Stamp with a black foreground). Both filters are emulated as blur + hard
+// threshold passes:
+//   1. Stamp — blur + LOW threshold: the blurred skirt reads as solid ink,
+//      fattening every line toward a uniform bold weight and fusing fine
+//      hair clusters.
+//   2. Cutout — blur + 50% threshold on the result: the edge stays at the
+//      midline (no net growth), so this pass only SIMPLIFIES the contours —
+//      smoothing wiggles, rounding junctions, and pinching thin spots into
+//      the organic breaks the reference shows.
+export interface StampOpts {
+  amount: number; // 0..1 — stamp fatten/smooth pass. 0 skips the pass.
+  cutout: number; // 0..1 — cutout break/simplify pass. 0 skips the pass.
+}
+
+// Blur radii in preview-space px at each slider's max, and the alpha cut
+// levels. Both sliders map linearly onto their radius, independently:
+//   stamp  — blur + LOW threshold: the blurred skirt reads as solid ink, so
+//            the pass fattens and smooths.
+//   cutout — a morphological OPENING built from two blur+threshold steps:
+//            erode (high cut — pinches thin spots into breaks and shaves
+//            nubs), then dilate by the same radius (low cut — restores the
+//            surviving ink to its original weight). Breaks without thinning:
+//            a single 50% cut would instead pull both edges of a thin stroke
+//            inward, visibly reducing the line weight.
+const STAMP_BLUR_MAX = 5;
+const STAMP_THRESHOLD = 0.08;
+const CUTOUT_BLUR_MAX = 3;
+// Erode/dilate by one blur sigma: Φ(±1) of the blurred edge profile.
+const CUTOUT_ERODE_CUT = 0.841;
+const CUTOUT_DILATE_CUT = 0.159;
+
+// Offscreens reused across frames so the growth animation doesn't allocate
+// two full canvases per tick.
+let stampSrc: HTMLCanvasElement | null = null;
+let stampOut: HTMLCanvasElement | null = null;
+
+const inkCache = new Map<string, [number, number, number]>();
+function parseInk(ink: string): [number, number, number] {
+  const hit = inkCache.get(ink);
+  if (hit) return hit;
+  const c = document.createElement("canvas");
+  c.width = c.height = 1;
+  const x = c.getContext("2d")!;
+  x.fillStyle = ink;
+  x.fillRect(0, 0, 1, 1);
+  const d = x.getImageData(0, 0, 1, 1).data;
+  const rgb: [number, number, number] = [d[0], d[1], d[2]];
+  inkCache.set(ink, rgb);
+  return rgb;
+}
+
+/** Stroke every root segment onto `ctx` (transform must already be set). */
+function paintRootStrokes(
   ctx: CanvasRenderingContext2D,
-  dpr: number,
-  w: number,
-  h: number,
   result: RootResult,
   ink: string,
-  background: string,
-  progress = 1,
-  _showBedrock = true,
-  brush: RootBrush = "organic",
+  progress: number,
+  brush: RootBrush,
 ) {
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, w, h);
-  if (background !== "transparent") {
-    ctx.fillStyle = background;
-    ctx.fillRect(0, 0, w, h);
-  }
-
   const engineered = brush === "engineered";
   // Round caps on organic: they overlap to hide the seams between the many
   // little segments. The ends don't read as rounded nubs because the coil
@@ -1195,6 +1254,104 @@ export function drawRoots(
   ctx.globalAlpha = 1;
 }
 
+export function drawRoots(
+  ctx: CanvasRenderingContext2D,
+  dpr: number,
+  w: number,
+  h: number,
+  result: RootResult,
+  ink: string,
+  background: string,
+  progress = 1,
+  _showBedrock = true,
+  brush: RootBrush = "organic",
+  stamp?: StampOpts,
+) {
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  if (background !== "transparent") {
+    ctx.fillStyle = background;
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  const useStamp =
+    brush === "organic" && !!stamp && (stamp.amount > 0 || stamp.cutout > 0);
+  if (!useStamp) {
+    paintRootStrokes(ctx, result, ink, progress, brush);
+    return;
+  }
+
+  // Stamp path: paint the same strokes onto a transparent offscreen at device
+  // resolution, blur it, then hard-threshold the alpha back into solid ink.
+  const pw = ctx.canvas.width;
+  const ph = ctx.canvas.height;
+  const src = (stampSrc ??= document.createElement("canvas"));
+  const out = (stampOut ??= document.createElement("canvas"));
+  if (src.width !== pw || src.height !== ph) {
+    src.width = pw;
+    src.height = ph;
+    out.width = pw;
+    out.height = ph;
+  }
+  const sctx = src.getContext("2d")!;
+  sctx.setTransform(1, 0, 0, 1, 0, 0);
+  sctx.clearRect(0, 0, pw, ph);
+  sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  paintRootStrokes(sctx, result, ink, progress, brush);
+
+  // Blur in device px so preview and magnified exports get the same spread
+  // relative to the strokes.
+  const octx = out.getContext("2d")!;
+  octx.setTransform(1, 0, 0, 1, 0, 0);
+  octx.clearRect(0, 0, pw, ph);
+  octx.filter = `blur(${stamp.amount * STAMP_BLUR_MAX * dpr}px)`;
+  octx.drawImage(src, 0, 0);
+  octx.filter = "none";
+
+  // Hard threshold: alpha snaps to solid ink or nothing.
+  const [ir, ig, ib] = parseInk(ink);
+  const thresholdAlpha = (tctx: CanvasRenderingContext2D, cut: number) => {
+    const img = tctx.getImageData(0, 0, pw, ph);
+    const data = img.data;
+    const T = Math.max(8, Math.round(255 * cut));
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] >= T) {
+        data[i] = ir;
+        data[i + 1] = ig;
+        data[i + 2] = ib;
+        data[i + 3] = 255;
+      } else {
+        data[i + 3] = 0;
+      }
+    }
+    tctx.putImageData(img, 0, 0);
+  };
+  thresholdAlpha(octx, STAMP_THRESHOLD);
+
+  // Cutout pass (opening): erode then dilate by the same radius. Thin spots
+  // pinch into breaks; everything that survives returns to its original
+  // weight. Reuses `src` as scratch. Skipped at zero.
+  let final = out;
+  if (stamp.cutout > 0) {
+    const blur = `blur(${stamp.cutout * CUTOUT_BLUR_MAX * dpr}px)`;
+    sctx.setTransform(1, 0, 0, 1, 0, 0);
+    sctx.clearRect(0, 0, pw, ph);
+    sctx.filter = blur;
+    sctx.drawImage(out, 0, 0);
+    sctx.filter = "none";
+    thresholdAlpha(sctx, CUTOUT_ERODE_CUT);
+    octx.clearRect(0, 0, pw, ph);
+    octx.filter = blur;
+    octx.drawImage(src, 0, 0);
+    octx.filter = "none";
+    thresholdAlpha(octx, CUTOUT_DILATE_CUT);
+  }
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(final, 0, 0);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
 export function buildRootsSVG(
   w: number,
   h: number,
@@ -1203,6 +1360,7 @@ export function buildRootsSVG(
   background: string,
   _showBedrock = true,
   brush: RootBrush = "organic",
+  stamp?: StampOpts,
 ) {
   const f = (n: number) => Math.round(n * 100) / 100;
   const engineered = brush === "engineered";
@@ -1213,6 +1371,34 @@ export function buildRootsSVG(
   // any surface; otherwise paint the canvas background.
   if (background !== "transparent")
     parts.push(`<rect width="${w}" height="${h}" fill="${background}"/>`);
+
+  // Ink-stamp treatment as a live SVG filter: Gaussian blur spreads the ink,
+  // then a steep linear ramp on alpha re-thresholds it to solid — the same
+  // blur + hard-threshold the canvas path applies per-pixel. The strokes stay
+  // vector underneath; the filter renders the treatment at any scale.
+  const useStamp =
+    brush === "organic" && !!stamp && (stamp.amount > 0 || stamp.cutout > 0);
+  if (useStamp) {
+    const slope = 80; // steepness of the alpha steps
+    // Stamp pass: fatten to bold ink.
+    let fx =
+      `<feGaussianBlur stdDeviation="${f(stamp.amount * STAMP_BLUR_MAX)}"/>` +
+      `<feComponentTransfer><feFuncA type="linear" slope="${slope}" intercept="${f(0.5 - slope * STAMP_THRESHOLD)}"/></feComponentTransfer>`;
+    // Cutout pass (opening): erode then dilate by the same radius, so thin
+    // spots break but the surviving ink keeps its weight.
+    if (stamp.cutout > 0) {
+      const cb = `<feGaussianBlur stdDeviation="${f(stamp.cutout * CUTOUT_BLUR_MAX)}"/>`;
+      fx +=
+        cb +
+        `<feComponentTransfer><feFuncA type="linear" slope="${slope}" intercept="${f(0.5 - slope * CUTOUT_ERODE_CUT)}"/></feComponentTransfer>` +
+        cb +
+        `<feComponentTransfer><feFuncA type="linear" slope="${slope}" intercept="${f(0.5 - slope * CUTOUT_DILATE_CUT)}"/></feComponentTransfer>`;
+    }
+    parts.push(
+      `<defs><filter id="stamp" x="-15%" y="-15%" width="130%" height="130%" color-interpolation-filters="sRGB">${fx}</filter></defs>`,
+    );
+    parts.push(`<g filter="url(#stamp)">`);
+  }
 
   // Mycelium group — faint hairs.
   parts.push(
@@ -1250,6 +1436,8 @@ export function buildRootsSVG(
     }
     parts.push(`</g>`);
   }
+
+  if (useStamp) parts.push(`</g>`);
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${parts.join("")}</svg>`;
 }

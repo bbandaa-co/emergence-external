@@ -103,6 +103,16 @@ export default function RootBrush({
 
   const hasOutput = result.edges.length > 0 || result.hairs.length > 0;
 
+  // Ink-stamp treatment (organic brush only) — a render-level pass, so it
+  // doesn't feed into growRoots.
+  const stampOpts = useMemo(
+    () =>
+      brush === "organic" && (params.stamp > 0 || params.cutout > 0)
+        ? { amount: params.stamp, cutout: params.cutout }
+        : undefined,
+    [brush, params.stamp, params.cutout],
+  );
+
   const clampPan = useCallback(
     (x: number, y: number, z: number) => {
       const { dw, dh } = viewportFitSize(w, h, window.innerWidth, window.innerHeight);
@@ -129,12 +139,18 @@ export default function RootBrush({
       canvas.style.height = `${dh * zoom}px`;
       drawDpr = pixelW / w;
     } else {
-      canvas.width = Math.round(w * cssDpr);
-      canvas.height = Math.round(h * cssDpr);
+      // Like fullscreen: render at the canvas's DISPLAYED size, so device
+      // pixels map 1:1 onto the screen instead of the browser rescaling the
+      // backing store — the inline preview shows exactly what fullscreen does.
+      const cssW = canvas.getBoundingClientRect().width || w;
+      const pixelW = Math.round(cssW * cssDpr);
+      const pixelH = Math.round(pixelW * (h / w));
+      canvas.width = pixelW;
+      canvas.height = pixelH;
       canvas.style.width = "";
       canvas.style.height = "";
       canvas.style.transform = "";
-      drawDpr = cssDpr;
+      drawDpr = pixelW / w;
     }
 
     setCanvasAspectVars(canvas, w, h);
@@ -151,8 +167,9 @@ export default function RootBrush({
       growth,
       true,
       brush,
+      stampOpts,
     );
-  }, [result, ink, background, w, h, growth, brush, isFullscreen, zoom]);
+  }, [result, ink, background, w, h, growth, brush, isFullscreen, zoom, stampOpts]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -163,6 +180,16 @@ export default function RootBrush({
   useEffect(() => {
     draw();
   }, [draw]);
+
+  // Redraw when the inline preview's layout size changes, since the backing
+  // store tracks the displayed size.
+  useEffect(() => {
+    const wrap = canvasWrapRef.current;
+    if (!wrap || isFullscreen) return;
+    const ro = new ResizeObserver(() => draw());
+    ro.observe(wrap);
+    return () => ro.disconnect();
+  }, [draw, isFullscreen]);
 
   useEffect(() => {
     if (!growing) return;
@@ -206,10 +233,11 @@ export default function RootBrush({
           growthRef.current,
           true,
           brush,
+          stampOpts,
         );
       },
     }),
-    [exportDims, w, h, pxScale, result, ink, background, growthRef, brush],
+    [exportDims, w, h, pxScale, result, ink, background, growthRef, brush, stampOpts],
   );
 
   const recorder = useCanvasRecorder(
@@ -350,6 +378,7 @@ export default function RootBrush({
       "transparent",
       true,
       brush,
+      stampOpts,
     );
     download(new Blob([svg], { type: "image/svg+xml" }), "svg");
   };
@@ -370,6 +399,7 @@ export default function RootBrush({
         1,
         true,
         brush,
+        stampOpts,
       );
     }).then((blob) => blob && download(blob, "png"));
   };
@@ -437,7 +467,9 @@ export default function RootBrush({
       header={brushHeader}
       config={config}
       onConfigChange={setConfig}
-      sliders={SLIDER_KEYS_SIMPLE.map(renderRow)}
+      sliders={SLIDER_KEYS_SIMPLE.filter(
+        (k) => brush === "organic" || (k !== "stamp" && k !== "cutout"),
+      ).map(renderRow)}
       ink={ink}
       background={background}
 
